@@ -107,11 +107,14 @@ async function renderWeek(view, start) {
   const grid = week.rows.map((r) => r.hours.map(toHundredths));
 
   const title = 'Week of ' + parseYmd(start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  // The nav sits at the table's right edge, with "This week" leftmost, so
+  // Prev/Next don't move as the title width changes or "This week" toggles.
   const toolbar = el('div', { class: 'toolbar' },
     el('h1', { text: title }),
-    el('a', { class: 'button', href: `#/week/${addDays(start, -7)}`, text: '← Prev' }),
-    el('a', { class: 'button', href: `#/week/${addDays(start, 7)}`, text: 'Next →' }),
-    start !== mondayOf(today) && el('a', { class: 'button', href: `#/week/${mondayOf(today)}`, text: 'This week' }));
+    el('div', { class: 'toolbar-end' },
+      start !== mondayOf(today) && el('a', { class: 'button', href: `#/week/${mondayOf(today)}`, text: 'This week' }),
+      el('a', { class: 'button', href: `#/week/${addDays(start, -7)}`, text: '← Prev' }),
+      el('a', { class: 'button', href: `#/week/${addDays(start, 7)}`, text: 'Next →' })));
 
   if (week.rows.length === 0) {
     setView(view, toolbar, el('p', {}, 'No projects yet. Add one on the ',
@@ -200,7 +203,7 @@ async function renderWeek(view, start) {
     el('tbody', {}, body),
     el('tfoot', {}, el('tr', {}, el('td', { text: 'Day total' }), dayTotals, weekTotal)));
   recompute();
-  setView(view, toolbar, el('div', { class: 'table-wrap' }, table));
+  setView(view, el('div', { class: 'fit' }, toolbar, el('div', { class: 'table-wrap' }, table)));
 }
 
 // ---------- other pages ----------
@@ -237,11 +240,13 @@ async function renderMonth(view, month) {
   const [y, m] = month.split('-').map(Number);
   const title = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const current = todayLocal().slice(0, 7);
+  // Same layout as the week page: nav at the table's right edge, "This month" leftmost.
   const toolbar = el('div', { class: 'toolbar' },
     el('h1', { text: title }),
-    el('a', { class: 'button', href: `#/month/${shiftMonth(month, -1)}`, text: '← Prev' }),
-    el('a', { class: 'button', href: `#/month/${shiftMonth(month, 1)}`, text: 'Next →' }),
-    month !== current && el('a', { class: 'button', href: `#/month/${current}`, text: 'This month' }));
+    el('div', { class: 'toolbar-end' },
+      month !== current && el('a', { class: 'button', href: `#/month/${current}`, text: 'This month' }),
+      el('a', { class: 'button', href: `#/month/${shiftMonth(month, -1)}`, text: '← Prev' }),
+      el('a', { class: 'button', href: `#/month/${shiftMonth(month, 1)}`, text: 'Next →' })));
 
   if (data.rows.length === 0) {
     setView(view, toolbar, el('p', { class: 'muted', text: `No hours logged in ${title}.` }));
@@ -254,11 +259,11 @@ async function renderMonth(view, month) {
       el('td', { class: 'copy-cell' }, shown, copyButton(`Copy hours for ${row.name}`, shown)));
   });
   const total = fmtTotal(toHundredths(data.total));
-  setView(view, toolbar, el('div', { class: 'table-wrap' }, el('table', {},
+  setView(view, el('div', { class: 'fit summary' }, toolbar, el('div', { class: 'table-wrap' }, el('table', {},
     el('thead', {}, el('tr', {}, el('th', { text: 'Project' }), el('th', { text: 'Hours' }))),
     el('tbody', {}, rows),
     el('tfoot', {}, el('tr', {}, el('td', { text: 'Total' }),
-      el('td', { class: 'copy-cell' }, total, copyButton('Copy total hours', total)))))));
+      el('td', { class: 'copy-cell' }, total, copyButton('Copy total hours', total))))))));
 }
 
 async function renderProjects(view) {

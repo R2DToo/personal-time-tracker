@@ -27,8 +27,8 @@ It starts again automatically whenever Docker starts.
 
 ## Using it
 
-- **Week**: type hours as decimals (`1.5`, `0.25`) into the grid. Each cell saves when you leave it or press Enter. Arrow keys, Enter and Tab move between cells.
-- **Month**: shows total hours per project for the month. Use the **Copy** buttons to paste the numbers into your invoice. A week that spans two months is split by day.
+- **Weekly Time Submission**: type hours as decimals (`1.5`, `0.25`) into the grid. Each cell saves when you leave it or press Enter. Arrow keys, Enter and Tab move between cells.
+- **Monthly Summary**: shows total hours per project for the month. Use the **Copy** buttons to paste the numbers into your invoice. A week that spans two months is split by day.
 - **Projects**: add, rename, archive and restore projects. Archived projects disappear from the week grid but keep their hours.
 - **Backup**: download a backup file, restore from one, or roll back to an automatic snapshot.
 
