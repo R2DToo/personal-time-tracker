@@ -21,6 +21,12 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
+// setView replaces a page's content, skipping false/null like el() does,
+// so `cond && el(...)` never renders the text "false".
+function setView(view, ...children) {
+  view.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
+}
+
 async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (method !== 'GET') {
@@ -72,7 +78,7 @@ function mondayOf(s) {
 }
 
 function showError(view, err) {
-  view.replaceChildren(el('p', { class: 'error-text', text: err.message }));
+  setView(view, el('p', { class: 'error-text', text: err.message }));
 }
 
 // ---------- backup reminder dot ----------
@@ -99,7 +105,7 @@ async function renderWeek(view, start) {
     start !== mondayOf(today) && el('a', { class: 'button', href: `#/week/${mondayOf(today)}`, text: 'This week' }));
 
   if (week.rows.length === 0) {
-    view.replaceChildren(toolbar, el('p', {}, 'No projects yet. Add one on the ',
+    setView(view, toolbar, el('p', {}, 'No projects yet. Add one on the ',
       el('a', { href: '#/projects', text: 'Projects page' }), '.'));
     return;
   }
@@ -186,21 +192,239 @@ async function renderWeek(view, start) {
     el('tbody', {}, body),
     el('tfoot', {}, el('tr', {}, el('td', { text: 'Day total' }), dayTotals, weekTotal)));
   recompute();
-  view.replaceChildren(toolbar, el('div', { class: 'table-wrap' }, table));
+  setView(view, toolbar, el('div', { class: 'table-wrap' }, table));
 }
 
 // ---------- other pages ----------
 
-async function renderMonth(view) {
-  view.replaceChildren(el('h1', { text: 'Month' }));
+function shiftMonth(month, n) {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+
+function copyButton(label, value) {
+  const status = el('span', { class: 'copied', 'aria-live': 'polite' });
+  let timer;
+  const btn = el('button', {
+    class: 'small', type: 'button', 'aria-label': label, title: 'Copy to clipboard', text: 'Copy',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+        status.textContent = 'Copied';
+        status.className = 'copied';
+      } catch {
+        status.textContent = 'Copy failed';
+        status.className = 'copied error-text';
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => { status.textContent = ''; }, 1500);
+    },
+  });
+  return [btn, status];
+}
+
+async function renderMonth(view, month) {
+  const data = await api('GET', `/api/month?month=${month}`);
+  const [y, m] = month.split('-').map(Number);
+  const title = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const current = todayLocal().slice(0, 7);
+  const toolbar = el('div', { class: 'toolbar' },
+    el('h1', { text: title }),
+    el('a', { class: 'button', href: `#/month/${shiftMonth(month, -1)}`, text: '← Prev' }),
+    el('a', { class: 'button', href: `#/month/${shiftMonth(month, 1)}`, text: 'Next →' }),
+    month !== current && el('a', { class: 'button', href: `#/month/${current}`, text: 'This month' }));
+
+  if (data.rows.length === 0) {
+    setView(view, toolbar, el('p', { class: 'muted', text: `No hours logged in ${title}.` }));
+    return;
+  }
+  const rows = data.rows.map((row) => {
+    const shown = fmtTotal(toHundredths(row.hours));
+    return el('tr', {},
+      el('td', {}, row.name, row.archived && el('span', { class: 'tag', text: ' (archived)' })),
+      el('td', { class: 'copy-cell' }, shown, copyButton(`Copy hours for ${row.name}`, shown)));
+  });
+  const total = fmtTotal(toHundredths(data.total));
+  setView(view, toolbar, el('div', { class: 'table-wrap' }, el('table', {},
+    el('thead', {}, el('tr', {}, el('th', { text: 'Project' }), el('th', { text: 'Hours' }))),
+    el('tbody', {}, rows),
+    el('tfoot', {}, el('tr', {}, el('td', { text: 'Total' }),
+      el('td', { class: 'copy-cell' }, total, copyButton('Copy total hours', total)))))));
 }
 
 async function renderProjects(view) {
-  view.replaceChildren(el('h1', { text: 'Projects' }));
+  const projects = await api('GET', '/api/projects');
+  const rerender = () => renderProjects(view).catch((err) => showError(view, err));
+
+  const addInput = el('input', { type: 'text', placeholder: 'New project name', maxlength: '100', 'aria-label': 'New project name' });
+  const addError = el('p', { class: 'error-text' });
+  const addForm = el('form', {
+    class: 'inline',
+    onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        await api('POST', '/api/projects', { name: addInput.value });
+        await rerender();
+        view.querySelector('form.inline input')?.focus();
+      } catch (err) {
+        addError.textContent = err.message;
+      }
+    },
+  }, addInput, el('button', { class: 'primary', type: 'submit', text: 'Add' }));
+
+  function activeItem(p) {
+    const li = el('li');
+    const err = el('span', { class: 'error-text' });
+    const show = () => li.replaceChildren(
+      el('span', { class: 'name', text: p.name }), err,
+      el('button', { class: 'small', type: 'button', text: 'Rename', onclick: edit }),
+      el('button', { class: 'small', type: 'button', text: 'Archive', onclick: () => setArchived(true) }));
+    async function setArchived(archived) {
+      try {
+        await api('PATCH', `/api/projects/${p.id}`, { archived });
+        await rerender();
+      } catch (e) { err.textContent = e.message; }
+    }
+    function edit() {
+      const input = el('input', { type: 'text', value: p.name, maxlength: '100', 'aria-label': `New name for ${p.name}` });
+      const save = async () => {
+        try {
+          await api('PATCH', `/api/projects/${p.id}`, { name: input.value });
+          await rerender();
+        } catch (e) { err.textContent = e.message; }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { err.textContent = ''; show(); }
+      });
+      li.replaceChildren(input, err,
+        el('button', { class: 'small primary', type: 'button', text: 'Save', onclick: save }),
+        el('button', { class: 'small', type: 'button', text: 'Cancel', onclick: () => { err.textContent = ''; show(); } }));
+      input.focus();
+      input.select();
+    }
+    show();
+    return li;
+  }
+
+  function archivedItem(p) {
+    const err = el('span', { class: 'error-text' });
+    return el('li', {},
+      el('span', { class: 'name', text: p.name }), err,
+      el('button', {
+        class: 'small', type: 'button', text: 'Restore',
+        onclick: async () => {
+          try {
+            await api('PATCH', `/api/projects/${p.id}`, { archived: false });
+            await rerender();
+          } catch (e) { err.textContent = e.message; }
+        },
+      }));
+  }
+
+  const active = projects.filter((p) => !p.archived);
+  const archived = projects.filter((p) => p.archived);
+  setView(view, 
+    el('h1', { text: 'Projects' }),
+    addForm, addError,
+    el('h2', { text: 'Active' }),
+    active.length ? el('ul', { class: 'list' }, active.map(activeItem)) : el('p', { class: 'muted', text: 'No active projects.' }),
+    archived.length > 0 && el('h2', { text: 'Archived' }),
+    archived.length > 0 && el('p', { class: 'muted', text: 'Hidden from the week grid. Their hours still count in month totals.' }),
+    archived.length > 0 && el('ul', { class: 'list archived' }, archived.map(archivedItem)));
+}
+
+const fmtStamp = (iso) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+// confirmPanel asks before replacing all data; onYes returns a promise.
+function confirmPanel(message, onYes) {
+  const result = el('p');
+  const panel = el('div', { class: 'panel warn' },
+    el('p', { text: message }),
+    el('div', { class: 'actions' },
+      el('button', {
+        class: 'primary', type: 'button', text: 'Continue',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            await onYes();
+            panel.replaceChildren(el('p', { class: 'ok-text', text: 'Restored. Your data has been replaced.' }));
+          } catch (err) {
+            result.className = 'error-text';
+            result.textContent = `Restore failed: ${err.message}`;
+            e.target.disabled = false;
+          }
+        },
+      }),
+      el('button', { type: 'button', text: 'Cancel', onclick: () => panel.remove() })),
+    result);
+  return panel;
 }
 
 async function renderBackup(view) {
-  view.replaceChildren(el('h1', { text: 'Backup' }));
+  const [status, snapshots] = await Promise.all([api('GET', '/api/backup/status'), api('GET', '/api/snapshots')]);
+  const rerender = () => renderBackup(view).catch((err) => showError(view, err));
+  const replaceWarning = 'This will replace all current data. Your current data is saved as a "Before restore" snapshot first. Continue?';
+
+  const download = el('a', {
+    class: 'button primary', href: '/api/backup/download', download: true, text: 'Download backup',
+    onclick: () => setTimeout(() => { refreshBackupDot(); rerender(); }, 1000),
+  });
+
+  const confirmSlot = el('div');
+  const fileError = el('p', { class: 'error-text' });
+  const fileInput = el('input', {
+    type: 'file', accept: '.json,application/json', 'aria-label': 'Backup file to restore',
+    onchange: async () => {
+      fileError.textContent = '';
+      confirmSlot.replaceChildren();
+      const file = fileInput.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const summary = await api('POST', '/api/backup/check', text);
+        confirmSlot.replaceChildren(confirmPanel(
+          `This file has ${summary.projects} projects and ${summary.entries} hour entries. ${replaceWarning}`,
+          async () => {
+            await api('POST', '/api/backup/restore', text);
+            fileInput.value = '';
+            setTimeout(rerender, 1200);
+          }));
+      } catch (err) {
+        fileError.textContent = `Can't restore this file: ${err.message}`;
+      }
+    },
+  });
+
+  const snapSlot = el('div');
+  const snapList = snapshots.length === 0
+    ? el('p', { class: 'muted', text: 'No snapshots yet. One is taken each day once you have data.' })
+    : el('ul', { class: 'list' }, snapshots.map((s) => el('li', {},
+      el('span', { class: 'name' }, fmtStamp(s.createdAt), el('span', { class: 'tag', text: s.kind === 'daily' ? '  Daily' : '  Before restore' })),
+      el('button', {
+        class: 'small', type: 'button', text: 'Restore',
+        onclick: () => snapSlot.replaceChildren(confirmPanel(replaceWarning, async () => {
+          await api('POST', `/api/snapshots/${encodeURIComponent(s.name)}/restore`, {});
+          setTimeout(rerender, 1200);
+        })),
+      }))));
+
+  setView(view, 
+    el('h1', { text: 'Backup' }),
+    status.reminder && el('div', { class: 'panel warn' },
+      el('p', { text: "It's been a while since your last backup. Download one and keep it somewhere safe (cloud drive, USB stick)." })),
+    el('div', { class: 'panel' },
+      el('p', {}, 'Last backup downloaded: ', el('strong', { text: status.lastDownloadAt ? fmtStamp(status.lastDownloadAt) : 'Never' })),
+      el('p', { class: 'muted', text: 'The file holds all your projects and hours. Keep it off this computer so it survives a dead laptop.' }),
+      download),
+    el('h2', { text: 'Restore from file' }),
+    el('div', { class: 'panel' }, fileInput, fileError),
+    confirmSlot,
+    el('h2', { text: 'Automatic snapshots' }),
+    el('p', { class: 'muted', text: 'A copy of your data is kept each day (last 14 days), plus one before every restore.' }),
+    snapSlot,
+    snapList);
 }
 
 // ---------- router ----------

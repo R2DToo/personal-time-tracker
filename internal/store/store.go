@@ -141,7 +141,7 @@ func sortProjects(ps []Project) {
 func (s *Store) Projects() []Project {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ps := append([]Project(nil), s.data.Projects...)
+	ps := append([]Project{}, s.data.Projects...)
 	sortProjects(ps)
 	return ps
 }

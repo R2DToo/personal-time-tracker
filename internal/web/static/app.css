@@ -172,6 +172,8 @@ form.inline input { flex: 1; }
   margin-bottom: 12px;
 }
 .panel.warn { border-color: var(--error); }
+.panel > :first-child { margin-top: 0; }
+.panel > :last-child { margin-bottom: 0; }
 .panel .actions { display: flex; gap: 8px; margin-top: 10px; }
 
 @media (max-width: 640px) {

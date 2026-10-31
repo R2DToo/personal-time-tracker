@@ -108,6 +108,13 @@ func TestGuardHeaders(t *testing.T) {
 			t.Errorf("%s: api Cache-Control = %q", host, rec.Header().Get("Cache-Control"))
 		}
 	}
+	// Embedded files carry no modtime, so without this a browser can keep
+	// running an old app.js after the consultant updates the container.
+	r := httptest.NewRequest("GET", "/app.js", nil)
+	r.Host = "localhost:24871"
+	if cc := do(h, r).Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("static Cache-Control = %q, want no-cache", cc)
+	}
 }
 
 func TestGuardBodyLimit(t *testing.T) {

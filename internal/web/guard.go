@@ -37,6 +37,10 @@ func guard(port int, next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			h.Set("Cache-Control", "no-store")
+		} else {
+			// Embedded files have no modtime to revalidate against; always
+			// refetch so an updated container never runs a stale app.js.
+			h.Set("Cache-Control", "no-cache")
 		}
 
 		if !allowedHosts[strings.ToLower(r.Host)] {

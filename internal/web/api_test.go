@@ -85,6 +85,16 @@ func TestAPIProjectsFlow(t *testing.T) {
 	}
 }
 
+// A fresh install has no projects or snapshots; the UI expects arrays.
+func TestAPIEmptyListsAreArrays(t *testing.T) {
+	c := newAPI(t)
+	for _, path := range []string{"/api/projects", "/api/snapshots"} {
+		if got := strings.TrimSpace(c.call("GET", path, "").Body.String()); got != "[]" {
+			t.Errorf("%s = %s, want []", path, got)
+		}
+	}
+}
+
 func TestAPIEntriesWeekMonth(t *testing.T) {
 	c := newAPI(t)
 	p := decode[store.Project](t, c.call("POST", "/api/projects", `{"name":"Acme"}`))
