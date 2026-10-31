@@ -2,9 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Personal Time Tracker</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
 </head>
 <body>
-<h1>Personal Time Tracker</h1>
+<nav class="sidebar" aria-label="Main">
+  <div class="brand">Personal Time Tracker</div>
+  <a href="#/week" data-nav="week">Week</a>
+  <a href="#/month" data-nav="month">Month</a>
+  <a href="#/projects" data-nav="projects">Projects</a>
+  <a href="#/backup" data-nav="backup">Backup<span class="dot" hidden title="Backup reminder"></span></a>
+</nav>
+<main id="view"></main>
 </body>
 </html>
