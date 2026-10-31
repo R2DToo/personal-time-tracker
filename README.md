@@ -16,7 +16,7 @@ total when you write your invoice.
 ## Install
 
 ```sh
-git clone <this repo's URL> personal-time-tracker
+git clone https://github.com/R2DToo/personal-time-tracker.git
 cd personal-time-tracker
 docker compose up -d --build
 ```
