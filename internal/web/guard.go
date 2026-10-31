@@ -18,6 +18,7 @@ const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 's
 // guard wraps every request. The app is only published on 127.0.0.1, but
 // any web page the user visits can still aim requests at it, so:
 //   - the Host must be a loopback name on our port (blocks DNS rebinding);
+//   - browser API requests must come from our own origin (Sec-Fetch-Site);
 //   - state-changing requests need a custom header and a JSON body, which a
 //     cross-site page can't send without a CORS preflight we never grant;
 //   - request bodies are size-capped.
@@ -45,6 +46,14 @@ func guard(port int, next http.Handler) http.Handler {
 
 		if !allowedHosts[strings.ToLower(r.Host)] {
 			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		// Browsers send Sec-Fetch-Site; only our own pages (or the user
+		// typing the URL) may call the API. This also covers GETs such as
+		// the backup download, which records the download time.
+		if site := r.Header.Get("Sec-Fetch-Site"); strings.HasPrefix(r.URL.Path, "/api/") &&
+			site != "" && site != "same-origin" && site != "none" {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

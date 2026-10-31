@@ -61,6 +61,29 @@ plus a copy of your data before every restore. You can roll back to any of
 them from the Backup page. These protect against mistakes, not against
 losing the computer.
 
+## Troubleshooting
+
+**The page won't load ("site can't be reached").** Check the app's log:
+
+```sh
+docker compose logs --tail 20 app
+```
+
+If it says `data.json is unreadable`, the data file was damaged (or edited by
+hand) and the app refuses to start rather than risk losing your hours. Recover
+from one of the automatic snapshots:
+
+```sh
+docker compose run --rm app -list-snapshots          # newest first
+docker compose run --rm app -recover-snapshot daily-2026-10-30.json
+docker compose restart
+```
+
+The damaged file is kept aside next to it (`data.json.broken-<time>`), and
+nothing changes if the snapshot itself is invalid. If you'd rather restore a
+downloaded backup, recover any snapshot first so the app starts, then use
+**Restore from file** on the Backup page.
+
 ## Where the data lives
 
 In the Docker volume `personal-time-tracker_data`, as `data.json` plus a
@@ -87,7 +110,7 @@ This app is built to have no third-party code at all:
 - **No npm, no frameworks, no CDNs.** The web page is plain HTML, CSS and JavaScript built into the binary.
 - **Pinned base images.** Both images in the `Dockerfile` are pinned by `@sha256:` digest, so they can't change without someone editing the file.
 - **Locked-down container.** It runs as a non-root user, with a read-only filesystem except the data volume, all Linux capabilities dropped, and `no-new-privileges`. The port is bound to `127.0.0.1`.
-- **Browser protections.** The app rejects requests that don't name `localhost` (blocking DNS-rebinding tricks), requires a custom header and JSON body for every change (so other websites can't forge requests), and sends a strict Content-Security-Policy.
+- **Browser protections.** The app rejects requests that don't name `localhost` (blocking DNS-rebinding tricks), refuses API requests that browsers mark as coming from another site, requires a custom header and JSON body for every change, and sends a strict Content-Security-Policy.
 
 ### Updating a pinned base image
 

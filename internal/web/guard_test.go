@@ -127,3 +127,31 @@ func TestGuardBodyLimit(t *testing.T) {
 		t.Errorf("2 MiB to /api/backup/restore: %d, want 200", c)
 	}
 }
+
+// Browsers label requests with Sec-Fetch-Site. Another site (or another
+// localhost port, which is "same-site") must not be able to hit the API,
+// e.g. <img src=".../api/backup/download"> clearing the backup reminder.
+func TestGuardRejectsCrossSiteAPI(t *testing.T) {
+	h := guard(testPort, okHandler)
+	cases := []struct {
+		path, site string
+		want       int
+	}{
+		{"/api/backup/download", "cross-site", 403},
+		{"/api/backup/download", "same-site", 403},
+		{"/api/backup/download", "same-origin", 200},
+		{"/api/backup/download", "none", 200},
+		{"/api/backup/download", "", 200}, // non-browser clients (healthcheck, curl)
+		{"/", "cross-site", 200},          // following a link to the app is fine
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", c.path, nil)
+		r.Host = "localhost:24871"
+		if c.site != "" {
+			r.Header.Set("Sec-Fetch-Site", c.site)
+		}
+		if got := do(h, r).Code; got != c.want {
+			t.Errorf("%s with Sec-Fetch-Site %q: %d, want %d", c.path, c.site, got, c.want)
+		}
+	}
+}

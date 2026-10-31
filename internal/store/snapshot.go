@@ -57,7 +57,14 @@ func (s *Store) EnsureDailySnapshot() error {
 
 // Snapshots lists restorable snapshots, newest first.
 func (s *Store) Snapshots() ([]SnapshotInfo, error) {
-	entries, err := os.ReadDir(filepath.Join(s.dir, snapshotsDir))
+	return ListSnapshots(s.dir)
+}
+
+// ListSnapshots lists the snapshots in a data dir, newest first. It works
+// without opening the store, so it's usable when data.json is unreadable.
+// CreatedAt is the file's write time: the real moment of the snapshot.
+func ListSnapshots(dataDir string) ([]SnapshotInfo, error) {
+	entries, err := os.ReadDir(filepath.Join(dataDir, snapshotsDir))
 	if err != nil {
 		return nil, err
 	}
@@ -67,21 +74,22 @@ func (s *Store) Snapshots() ([]SnapshotInfo, error) {
 		if e.IsDir() || !snapshotName.MatchString(name) {
 			continue
 		}
-		info := SnapshotInfo{Name: name}
-		stem := strings.TrimSuffix(name, ".json")
-		if d, ok := strings.CutPrefix(stem, "daily-"); ok {
-			info.Kind = "daily"
-			info.CreatedAt, err = time.Parse(dateLayout, d)
-		} else {
-			info.Kind = "pre-restore"
-			info.CreatedAt, err = time.Parse("20060102T150405Z", strings.TrimPrefix(stem, "pre-restore-"))
-		}
+		fi, err := e.Info()
 		if err != nil {
-			continue // name matched the pattern but isn't a real date
+			continue
 		}
-		list = append(list, info)
+		kind := "pre-restore"
+		if strings.HasPrefix(name, "daily-") {
+			kind = "daily"
+		}
+		list = append(list, SnapshotInfo{Name: name, Kind: kind, CreatedAt: fi.ModTime().UTC()})
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].CreatedAt.After(list[j].CreatedAt) })
+	sort.Slice(list, func(i, j int) bool {
+		if !list[i].CreatedAt.Equal(list[j].CreatedAt) {
+			return list[i].CreatedAt.After(list[j].CreatedAt)
+		}
+		return list[i].Name > list[j].Name
+	})
 	return list, nil
 }
 
@@ -103,4 +111,32 @@ func (s *Store) RestoreSnapshot(name string) error {
 		return err
 	}
 	return s.restoreData(d)
+}
+
+// RecoverFromSnapshot replaces dataDir/data.json with a snapshot without
+// opening the store, for when data.json is unreadable and the app won't
+// start. The current data.json (if any) is kept aside, and its new path is
+// returned. Nothing changes unless the snapshot is valid.
+func RecoverFromSnapshot(dataDir, name string, now func() time.Time) (keptAside string, err error) {
+	if !snapshotName.MatchString(name) {
+		return "", errorf(ErrInvalid, "not a snapshot name: %q", name)
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, snapshotsDir, name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", errorf(ErrNotFound, "snapshot %q not found", name)
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := DecodeBackup(raw); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dataDir, dataFile)
+	if _, err := os.Stat(path); err == nil {
+		keptAside = path + ".broken-" + now().UTC().Format("20060102T150405Z")
+		if err := os.Rename(path, keptAside); err != nil {
+			return "", err
+		}
+	}
+	return keptAside, writeFileAtomic(path, raw)
 }

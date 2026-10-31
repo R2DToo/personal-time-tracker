@@ -59,6 +59,15 @@ function fmtTotal(h) {
 
 const HOURS_RE = /^(\d+(\.\d{1,2})?|\.\d{1,2})$/;
 
+// parseCell returns the hours typed in a grid cell (0 when blank), or null
+// if the text isn't valid.
+function parseCell(text) {
+  text = text.trim();
+  if (text === '') return 0;
+  if (!HOURS_RE.test(text) || Number(text) > 24) return null;
+  return Number(text);
+}
+
 // Local calendar dates as YYYY-MM-DD; never toISOString(), which is UTC.
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -131,19 +140,16 @@ async function renderWeek(view, start) {
   }
 
   async function save(input, r, c) {
-    const text = input.value.trim();
-    let hours = 0;
-    if (text !== '') {
-      if (!HOURS_RE.test(text) || Number(text) > 24) {
-        markError(input, 'Enter hours from 0 to 24, like 1.5 (up to two decimals).');
-        return;
-      }
-      hours = Number(text);
+    const hours = parseCell(input.value);
+    if (hours === null) {
+      markError(input, 'Enter hours from 0 to 24, like 1.5 (up to two decimals).');
+      return;
     }
     try {
       await api('PUT', '/api/entries', { projectId: week.rows[r].projectId, date: week.days[c], hours });
       grid[r][c] = toHundredths(hours);
       input.value = hours === 0 ? '' : fmtMin(grid[r][c]);
+      delete input.dataset.dirty;
       input.classList.remove('error');
       input.removeAttribute('title');
       recompute();
@@ -180,7 +186,9 @@ async function renderWeek(view, start) {
         el('input', {
           type: 'text', inputmode: 'decimal', autocomplete: 'off',
           'data-r': r, 'data-c': c, value: h ? fmtMin(h) : '',
+          'data-project': row.projectId, 'data-date': week.days[c],
           'aria-label': `${row.name}, ${week.days[c]}`,
+          oninput: (e) => { e.target.dataset.dirty = '1'; },
           onchange: (e) => save(e.target, r, c),
           onkeydown: (e) => onKey(e, r, c),
         }))),
@@ -426,6 +434,30 @@ async function renderBackup(view) {
     snapSlot,
     snapList);
 }
+
+// ---------- unsaved cells on close ----------
+
+// Closing or reloading the tab doesn't fire `change`, so a number typed into
+// the focused cell would be lost. Send dirty cells with keepalive, which
+// outlives the page; ask before leaving if one can't be saved.
+const dirtyCells = () => [...document.querySelectorAll('table.grid input[data-dirty]')];
+
+window.addEventListener('pagehide', () => {
+  for (const input of dirtyCells()) {
+    const hours = parseCell(input.value);
+    if (hours === null) continue;
+    fetch('/api/entries', {
+      method: 'PUT',
+      keepalive: true,
+      headers: { 'X-PTT-Request': '1', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: input.dataset.project, date: input.dataset.date, hours }),
+    });
+  }
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (dirtyCells().some((input) => parseCell(input.value) === null)) e.preventDefault();
+});
 
 // ---------- router ----------
 

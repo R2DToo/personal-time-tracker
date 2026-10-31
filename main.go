@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +20,8 @@ import (
 
 func main() {
 	healthcheck := flag.Bool("healthcheck", false, "probe the running server and exit 0 if healthy")
+	listSnaps := flag.Bool("list-snapshots", false, "list restorable snapshots in DATA_DIR and exit")
+	recoverSnap := flag.String("recover-snapshot", "", "replace DATA_DIR/data.json with the named snapshot, keeping the old file aside, and exit")
 	flag.Parse()
 
 	port := 24871
@@ -38,9 +41,35 @@ func main() {
 		dataDir = "/data"
 	}
 
+	// Recovery tools work without opening the store, for when data.json is
+	// unreadable and the app refuses to start.
+	if *listSnaps {
+		list, err := store.ListSnapshots(dataDir)
+		if err != nil {
+			slog.Error("can't list snapshots", "err", err)
+			os.Exit(1)
+		}
+		for _, s := range list {
+			fmt.Printf("%s\t%s\t%s\n", s.Name, s.Kind, s.CreatedAt.Format(time.RFC3339))
+		}
+		return
+	}
+	if *recoverSnap != "" {
+		kept, err := store.RecoverFromSnapshot(dataDir, *recoverSnap, time.Now)
+		if err != nil {
+			slog.Error("recovery failed; nothing was changed", "err", err)
+			os.Exit(1)
+		}
+		if kept != "" {
+			fmt.Println("Previous data.json kept as", kept)
+		}
+		fmt.Println("Restored", *recoverSnap, "- start the app again with: docker compose restart")
+		return
+	}
+
 	st, err := store.Open(dataDir, time.Now)
 	if err != nil {
-		slog.Error("can't open data", "err", err)
+		slog.Error("can't open data; see Troubleshooting in the README", "err", err)
 		os.Exit(1)
 	}
 	snapshot := func() {

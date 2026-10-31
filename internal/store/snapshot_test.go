@@ -74,6 +74,10 @@ func TestSnapshotsListing(t *testing.T) {
 	*now = now.Add(24*time.Hour + 3*time.Hour)
 	s.writePreRestore([]byte("{}")) // 2026-10-31T15:00:00Z
 	os.WriteFile(filepath.Join(s.dir, "snapshots", "notes.txt"), []byte("x"), 0o600)
+	daily := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+	pre := time.Date(2026, 10, 31, 15, 0, 0, 0, time.UTC)
+	os.Chtimes(filepath.Join(s.dir, "snapshots", "daily-2026-10-30.json"), daily, daily)
+	os.Chtimes(filepath.Join(s.dir, "snapshots", "pre-restore-20261031T150000Z.json"), pre, pre)
 
 	list, err := s.Snapshots()
 	if err != nil {
@@ -87,7 +91,7 @@ func TestSnapshotsListing(t *testing.T) {
 		t.Errorf("first = %+v", list[0])
 	}
 	if list[1].Name != "daily-2026-10-30.json" || list[1].Kind != "daily" ||
-		!list[1].CreatedAt.Equal(time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)) {
+		!list[1].CreatedAt.Equal(daily) {
 		t.Errorf("second = %+v", list[1])
 	}
 }
@@ -126,6 +130,76 @@ func TestRestoreSnapshotRejectsBadNames(t *testing.T) {
 		t.Errorf("missing: err = %v, want ErrNotFound", err)
 	}
 	if after, _ := os.ReadFile(filepath.Join(dir, "data.json")); !bytes.Equal(before, after) {
+		t.Error("data.json changed")
+	}
+}
+
+// CreatedAt is the real moment the snapshot was written, so the UI can show
+// it in local time; a UTC-dated name would show the wrong local day.
+func TestSnapshotCreatedAtIsWriteTime(t *testing.T) {
+	s, dir, _ := openTemp(t)
+	mustAdd(t, s, "Acme")
+	s.EnsureDailySnapshot()
+	written := time.Date(2026, 10, 30, 14, 5, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(dir, "snapshots", "daily-2026-10-30.json"), written, written); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.Snapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list[0].CreatedAt.Equal(written) {
+		t.Errorf("CreatedAt = %v, want %v", list[0].CreatedAt, written)
+	}
+}
+
+// When data.json is unreadable the app won't start, so the web UI can't
+// restore. RecoverFromSnapshot works on the directory directly.
+func TestRecoverFromSnapshotWithCorruptData(t *testing.T) {
+	s, dir, now := openTemp(t)
+	mustAdd(t, s, "Acme")
+	s.EnsureDailySnapshot()
+	snap, _ := os.ReadFile(filepath.Join(dir, "snapshots", "daily-2026-10-30.json"))
+	corrupt := []byte(`{"version":1,"projects":[`)
+	os.WriteFile(filepath.Join(dir, "data.json"), corrupt, 0o600)
+
+	for _, bad := range []string{"../data.json", "daily-x.json"} {
+		if _, err := RecoverFromSnapshot(dir, bad, fakeClock(now)); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%q: err = %v, want ErrInvalid", bad, err)
+		}
+	}
+	if _, err := RecoverFromSnapshot(dir, "daily-2020-01-01.json", fakeClock(now)); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing: err = %v, want ErrNotFound", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "data.json")); !bytes.Equal(got, corrupt) {
+		t.Fatal("failed attempts changed data.json")
+	}
+
+	kept, err := RecoverFromSnapshot(dir, "daily-2026-10-30.json", fakeClock(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(kept); !bytes.Equal(got, corrupt) {
+		t.Errorf("bad file not kept aside at %s", kept)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "data.json")); !bytes.Equal(got, snap) {
+		t.Error("data.json not replaced by snapshot")
+	}
+	if _, err := Open(dir, fakeClock(now)); err != nil {
+		t.Errorf("open after recovery: %v", err)
+	}
+}
+
+func TestRecoverRejectsInvalidSnapshotContent(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	os.MkdirAll(filepath.Join(dir, "snapshots"), 0o700)
+	os.WriteFile(filepath.Join(dir, "snapshots", "daily-2026-10-29.json"), []byte(`nope`), 0o600)
+	os.WriteFile(filepath.Join(dir, "data.json"), []byte(`old`), 0o600)
+	if _, err := RecoverFromSnapshot(dir, "daily-2026-10-29.json", fakeClock(&now)); !errors.Is(err, ErrInvalid) {
+		t.Errorf("err = %v, want ErrInvalid", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "data.json")); string(got) != "old" {
 		t.Error("data.json changed")
 	}
 }

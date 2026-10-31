@@ -67,6 +67,11 @@ func decodeData(raw []byte) (Data, error) {
 		// Every problem in a file, duplicate names included, is invalid input.
 		return Data{}, asInvalid(err)
 	}
+	// Store names in canonical trimmed form so later uniqueness checks
+	// compare like with like.
+	for i := range d.Projects {
+		d.Projects[i].Name = strings.TrimSpace(d.Projects[i].Name)
+	}
 	return d, nil
 }
 
@@ -120,6 +125,10 @@ func writeFileAtomic(path string, b []byte) error {
 // commit saves d and, only if that succeeds, makes it the live state.
 // Call with s.mu held.
 func (s *Store) commit(d Data) error {
+	// Never write a state the next Open would refuse to load.
+	if err := Validate(d); err != nil {
+		return err
+	}
 	b, err := encodeData(d)
 	if err != nil {
 		return err
@@ -157,7 +166,7 @@ func (s *Store) projectIndex(d Data, id string) int {
 
 func nameTaken(d Data, name, exceptID string) bool {
 	for _, p := range d.Projects {
-		if p.ID != exceptID && strings.EqualFold(p.Name, name) {
+		if p.ID != exceptID && nameKey(p.Name) == nameKey(name) {
 			return true
 		}
 	}

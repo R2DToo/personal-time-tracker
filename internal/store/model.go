@@ -49,6 +49,11 @@ func (d Data) clone() Data {
 	return c
 }
 
+// nameKey is the one comparison key for project-name uniqueness.
+func nameKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
 func normalizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -79,7 +84,7 @@ func Validate(d Data) error {
 		if err != nil {
 			return err
 		}
-		key := strings.ToLower(name)
+		key := nameKey(name)
 		if names[key] {
 			return errorf(ErrDuplicateName, "more than one project named %q", name)
 		}

@@ -132,3 +132,22 @@ func TestBackupReminder(t *testing.T) {
 		t.Error("no reminder after 31 days")
 	}
 }
+
+// A backup with a padded name must not let a case/space duplicate in,
+// which would leave a data.json the next Open refuses.
+func TestRestorePaddedNameStaysLoadable(t *testing.T) {
+	s, dir, now := openTemp(t)
+	raw := `{"version":1,"projects":[{"id":"p_1","name":" Acme ","archived":false,"createdAt":"2026-10-01T00:00:00Z"}],"entries":[],"lastBackupDownloadAt":null}`
+	if err := s.Restore([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if ps := s.Projects(); ps[0].Name != "Acme" {
+		t.Errorf("restored name = %q, want trimmed", ps[0].Name)
+	}
+	if _, err := s.AddProject("acme"); !errors.Is(err, ErrDuplicateName) {
+		t.Errorf("add duplicate of padded name: err = %v", err)
+	}
+	if _, err := Open(dir, fakeClock(now)); err != nil {
+		t.Errorf("reopen: %v", err)
+	}
+}
