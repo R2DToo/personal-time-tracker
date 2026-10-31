@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -53,10 +52,10 @@ func (d Data) clone() Data {
 func normalizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", fmt.Errorf("%w: project name can't be empty", ErrInvalid)
+		return "", errorf(ErrInvalid, "project name can't be empty")
 	}
 	if utf8.RuneCountInString(name) > maxNameRunes {
-		return "", fmt.Errorf("%w: project name can't be longer than %d characters", ErrInvalid, maxNameRunes)
+		return "", errorf(ErrInvalid, "project name can't be longer than %d characters", maxNameRunes)
 	}
 	return name, nil
 }
@@ -64,16 +63,16 @@ func normalizeName(name string) (string, error) {
 // Validate checks every invariant of Data and returns the first problem.
 func Validate(d Data) error {
 	if d.Version != FormatVersion {
-		return fmt.Errorf("%w: unsupported format version %d", ErrInvalid, d.Version)
+		return errorf(ErrInvalid, "unsupported format version %d", d.Version)
 	}
 	ids := make(map[string]bool, len(d.Projects))
 	names := make(map[string]bool, len(d.Projects))
 	for _, p := range d.Projects {
 		if p.ID == "" {
-			return fmt.Errorf("%w: project with empty id", ErrInvalid)
+			return errorf(ErrInvalid, "project with empty id")
 		}
 		if ids[p.ID] {
-			return fmt.Errorf("%w: duplicate project id %q", ErrInvalid, p.ID)
+			return errorf(ErrInvalid, "duplicate project id %q", p.ID)
 		}
 		ids[p.ID] = true
 		name, err := normalizeName(p.Name)
@@ -82,24 +81,24 @@ func Validate(d Data) error {
 		}
 		key := strings.ToLower(name)
 		if names[key] {
-			return fmt.Errorf("%w: more than one project named %q", ErrDuplicateName, name)
+			return errorf(ErrDuplicateName, "more than one project named %q", name)
 		}
 		names[key] = true
 	}
 	seen := make(map[[2]string]bool, len(d.Entries))
 	for _, e := range d.Entries {
 		if !ids[e.ProjectID] {
-			return fmt.Errorf("%w: entry for unknown project %q", ErrInvalid, e.ProjectID)
+			return errorf(ErrInvalid, "entry for unknown project %q", e.ProjectID)
 		}
 		if _, err := ParseDate(e.Date); err != nil {
 			return err
 		}
 		if e.Hours <= 0 || e.Hours > MaxHours {
-			return fmt.Errorf("%w: entry on %s has %s hours; must be more than 0 and at most 24", ErrInvalid, e.Date, e.Hours)
+			return errorf(ErrInvalid, "entry on %s has %s hours; must be more than 0 and at most 24", e.Date, e.Hours)
 		}
 		k := [2]string{e.ProjectID, e.Date}
 		if seen[k] {
-			return fmt.Errorf("%w: more than one entry for project %q on %s", ErrInvalid, e.ProjectID, e.Date)
+			return errorf(ErrInvalid, "more than one entry for project %q on %s", e.ProjectID, e.Date)
 		}
 		seen[k] = true
 	}

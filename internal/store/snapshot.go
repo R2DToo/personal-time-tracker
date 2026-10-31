@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -90,11 +89,11 @@ func (s *Store) Snapshots() ([]SnapshotInfo, error) {
 // current data as a pre-restore snapshot.
 func (s *Store) RestoreSnapshot(name string) error {
 	if !snapshotName.MatchString(name) {
-		return fmt.Errorf("%w: not a snapshot name: %q", ErrInvalid, name)
+		return errorf(ErrInvalid, "not a snapshot name: %q", name)
 	}
 	raw, err := os.ReadFile(filepath.Join(s.dir, snapshotsDir, name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%w: snapshot %q", ErrNotFound, name)
+		return errorf(ErrNotFound, "snapshot %q", name)
 	}
 	if err != nil {
 		return err

@@ -25,12 +25,12 @@ const dateLayout = "2006-01-02"
 func ParseHours(s string) (Hours, error) {
 	whole, frac, hasDot := strings.Cut(s, ".")
 	if (whole == "" && frac == "") || !allDigits(whole) || !allDigits(frac) || len(frac) > 2 || (hasDot && frac == "") {
-		return 0, fmt.Errorf("%w: hours must be a number like 1.5 with at most two decimals", ErrInvalid)
+		return 0, errorf(ErrInvalid, "hours must be a number like 1.5 with at most two decimals")
 	}
 	var h int64
 	if whole != "" {
 		if len(whole) > 4 {
-			return 0, fmt.Errorf("%w: hours must be between 0 and 24", ErrInvalid)
+			return 0, errorf(ErrInvalid, "hours must be between 0 and 24")
 		}
 		w, _ := strconv.ParseInt(whole, 10, 64)
 		h = w * 100
@@ -43,7 +43,7 @@ func ParseHours(s string) (Hours, error) {
 		h += f
 	}
 	if Hours(h) > MaxHours {
-		return 0, fmt.Errorf("%w: hours must be between 0 and 24", ErrInvalid)
+		return 0, errorf(ErrInvalid, "hours must be between 0 and 24")
 	}
 	return Hours(h), nil
 }
@@ -89,7 +89,7 @@ func (h *Hours) UnmarshalJSON(b []byte) error {
 func ParseDate(s string) (time.Time, error) {
 	t, err := time.Parse(dateLayout, s)
 	if err != nil || t.Format(dateLayout) != s {
-		return time.Time{}, fmt.Errorf("%w: date must be YYYY-MM-DD, got %q", ErrInvalid, s)
+		return time.Time{}, errorf(ErrInvalid, "date must be YYYY-MM-DD, got %q", s)
 	}
 	return t, nil
 }

@@ -58,13 +58,14 @@ func decodeData(raw []byte) (Data, error) {
 	dec.DisallowUnknownFields()
 	var d Data
 	if err := dec.Decode(&d); err != nil {
-		return Data{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		return Data{}, errorf(ErrInvalid, "not a valid Personal Time Tracker file: %v", err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return Data{}, fmt.Errorf("%w: unexpected data after the JSON document", ErrInvalid)
+		return Data{}, errorf(ErrInvalid, "not a valid Personal Time Tracker file: unexpected data after the JSON document")
 	}
 	if err := Validate(d); err != nil {
-		return Data{}, err
+		// Every problem in a file, duplicate names included, is invalid input.
+		return Data{}, asInvalid(err)
 	}
 	return d, nil
 }
@@ -179,7 +180,7 @@ func (s *Store) AddProject(name string) (Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if nameTaken(s.data, name, "") {
-		return Project{}, fmt.Errorf("%w: a project named %q already exists", ErrDuplicateName, name)
+		return Project{}, errorf(ErrDuplicateName, "a project named %q already exists", name)
 	}
 	id, err := newProjectID()
 	if err != nil {
@@ -203,10 +204,10 @@ func (s *Store) RenameProject(id, name string) (Project, error) {
 	defer s.mu.Unlock()
 	i := s.projectIndex(s.data, id)
 	if i < 0 {
-		return Project{}, fmt.Errorf("%w: project %q", ErrNotFound, id)
+		return Project{}, errorf(ErrNotFound, "project %q", id)
 	}
 	if nameTaken(s.data, name, id) {
-		return Project{}, fmt.Errorf("%w: a project named %q already exists", ErrDuplicateName, name)
+		return Project{}, errorf(ErrDuplicateName, "a project named %q already exists", name)
 	}
 	d := s.data.clone()
 	d.Projects[i].Name = name
@@ -221,7 +222,7 @@ func (s *Store) SetArchived(id string, archived bool) (Project, error) {
 	defer s.mu.Unlock()
 	i := s.projectIndex(s.data, id)
 	if i < 0 {
-		return Project{}, fmt.Errorf("%w: project %q", ErrNotFound, id)
+		return Project{}, errorf(ErrNotFound, "project %q", id)
 	}
 	d := s.data.clone()
 	d.Projects[i].Archived = archived

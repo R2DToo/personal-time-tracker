@@ -1,7 +1,6 @@
 package store
 
 import (
-	"fmt"
 	"strings"
 	"time"
 )
@@ -13,12 +12,12 @@ func (s *Store) SetHours(projectID, date string, h Hours) error {
 		return err
 	}
 	if h < 0 || h > MaxHours {
-		return fmt.Errorf("%w: hours must be between 0 and 24", ErrInvalid)
+		return errorf(ErrInvalid, "hours must be between 0 and 24")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.projectIndex(s.data, projectID) < 0 {
-		return fmt.Errorf("%w: project %q", ErrNotFound, projectID)
+		return errorf(ErrNotFound, "project %q", projectID)
 	}
 	d := s.data.clone()
 	found := -1
@@ -62,7 +61,7 @@ func (s *Store) Week(start string) (WeekView, error) {
 		return WeekView{}, err
 	}
 	if t.Weekday() != time.Monday {
-		return WeekView{}, fmt.Errorf("%w: week must start on a Monday, got %s", ErrInvalid, start)
+		return WeekView{}, errorf(ErrInvalid, "week must start on a Monday, got %s", start)
 	}
 	w := WeekView{Start: start, Rows: []WeekRow{}}
 	dayIndex := make(map[string]int, 7)
@@ -115,7 +114,7 @@ type MonthView struct {
 // inside the month count, so weeks spanning two months split by day.
 func (s *Store) Month(month string) (MonthView, error) {
 	if t, err := time.Parse("2006-01", month); err != nil || t.Format("2006-01") != month {
-		return MonthView{}, fmt.Errorf("%w: month must be YYYY-MM, got %q", ErrInvalid, month)
+		return MonthView{}, errorf(ErrInvalid, "month must be YYYY-MM, got %q", month)
 	}
 	prefix := month + "-"
 	m := MonthView{Month: month, Rows: []MonthRow{}}
