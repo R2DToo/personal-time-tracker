@@ -131,3 +131,36 @@ func TestMonthIncludesArchivedAndSkipsEmpty(t *testing.T) {
 		t.Errorf("bad month err = %v", err)
 	}
 }
+
+func TestMonthDaily(t *testing.T) {
+	s, _, _ := openTemp(t)
+	a := mustAdd(t, s, "Acme")
+	b := mustAdd(t, s, "Beta")
+	mustSet(t, s, a.ID, "2026-02-01", 150)
+	mustSet(t, s, a.ID, "2026-02-28", 800)
+	mustSet(t, s, b.ID, "2026-02-01", 225)
+	mustSet(t, s, b.ID, "2026-03-01", 900) // next month: excluded
+	m, err := s.Month("2026-02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Days) != 28 || m.Days[0] != "2026-02-01" || m.Days[27] != "2026-02-28" {
+		t.Fatalf("days = %v", m.Days)
+	}
+	if len(m.Rows) != 2 {
+		t.Fatalf("rows = %+v", m.Rows)
+	}
+	for _, r := range m.Rows {
+		if len(r.Daily) != 28 {
+			t.Fatalf("%s daily len = %d", r.Name, len(r.Daily))
+		}
+	}
+	acme, beta := m.Rows[0].Daily, m.Rows[1].Daily
+	if acme[0] != 150 || acme[27] != 800 || acme[1] != 0 || beta[0] != 225 || beta[27] != 0 {
+		t.Errorf("acme = %v, beta = %v", acme, beta)
+	}
+	leap, _ := s.Month("2028-02")
+	if len(leap.Days) != 29 {
+		t.Errorf("leap Feb days = %d", len(leap.Days))
+	}
+}

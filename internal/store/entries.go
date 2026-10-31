@@ -1,9 +1,6 @@
 package store
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 // SetHours records h hours for a project on a date; 0 removes the entry.
 // Archived projects still accept hours so past weeks stay editable.
@@ -98,41 +95,56 @@ func (s *Store) Week(start string) (WeekView, error) {
 }
 
 type MonthRow struct {
-	ProjectID string `json:"projectId"`
-	Name      string `json:"name"`
-	Archived  bool   `json:"archived"`
-	Hours     Hours  `json:"hours"`
+	ProjectID string  `json:"projectId"`
+	Name      string  `json:"name"`
+	Archived  bool    `json:"archived"`
+	Hours     Hours   `json:"hours"`
+	Daily     []Hours `json:"daily"` // one per entry in MonthView.Days
 }
 
 type MonthView struct {
 	Month string     `json:"month"`
+	Days  []string   `json:"days"`
 	Rows  []MonthRow `json:"rows"`
 	Total Hours      `json:"total"`
 }
 
-// Month totals hours per project for a calendar month (YYYY-MM). Only days
-// inside the month count, so weeks spanning two months split by day.
+// Month totals hours per project for a calendar month (YYYY-MM), with a
+// per-day breakdown for the daily chart. Only days inside the month count,
+// so weeks spanning two months split by day.
 func (s *Store) Month(month string) (MonthView, error) {
-	if t, err := time.Parse("2006-01", month); err != nil || t.Format("2006-01") != month {
+	first, err := time.Parse("2006-01", month)
+	if err != nil || first.Format("2006-01") != month {
 		return MonthView{}, errorf(ErrInvalid, "month must be YYYY-MM, got %q", month)
 	}
-	prefix := month + "-"
-	m := MonthView{Month: month, Rows: []MonthRow{}}
+	m := MonthView{Month: month, Days: []string{}, Rows: []MonthRow{}}
+	dayIndex := make(map[string]int, 31)
+	for d := first; d.Month() == first.Month(); d = d.AddDate(0, 0, 1) {
+		dayIndex[d.Format(dateLayout)] = len(m.Days)
+		m.Days = append(m.Days, d.Format(dateLayout))
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	totals := make(map[string]Hours)
+	daily := make(map[string][]Hours)
 	for _, e := range s.data.Entries {
-		if strings.HasPrefix(e.Date, prefix) {
-			totals[e.ProjectID] += e.Hours
+		if i, ok := dayIndex[e.Date]; ok {
+			if daily[e.ProjectID] == nil {
+				daily[e.ProjectID] = make([]Hours, len(m.Days))
+			}
+			daily[e.ProjectID][i] += e.Hours
 		}
 	}
 	ps := append([]Project(nil), s.data.Projects...)
 	sortProjects(ps)
 	for _, p := range ps {
-		if h := totals[p.ID]; h > 0 {
-			m.Rows = append(m.Rows, MonthRow{ProjectID: p.ID, Name: p.Name, Archived: p.Archived, Hours: h})
-			m.Total += h
+		var total Hours
+		for _, h := range daily[p.ID] {
+			total += h
+		}
+		if total > 0 {
+			m.Rows = append(m.Rows, MonthRow{ProjectID: p.ID, Name: p.Name, Archived: p.Archived, Hours: total, Daily: daily[p.ID]})
+			m.Total += total
 		}
 	}
 	return m, nil

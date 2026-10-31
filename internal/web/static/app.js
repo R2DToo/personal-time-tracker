@@ -252,10 +252,12 @@ async function renderMonth(view, month) {
     setView(view, toolbar, el('p', { class: 'muted', text: `No hours logged in ${title}.` }));
     return;
   }
-  const rows = data.rows.map((row) => {
+  const slots = seriesSlots(data.rows.length);
+  const rows = data.rows.map((row, i) => {
     const shown = fmtTotal(toHundredths(row.hours));
     return el('tr', {},
-      el('td', {}, row.name, row.archived && el('span', { class: 'tag', text: ' (archived)' })),
+      el('td', {}, el('span', { class: `swatch ${slots[i]}`, 'aria-hidden': 'true' }),
+        row.name, row.archived && el('span', { class: 'tag', text: ' (archived)' })),
       el('td', { class: 'copy-cell' }, shown, copyButton(`Copy hours for ${row.name}`, shown)));
   });
   const total = fmtTotal(toHundredths(data.total));
@@ -263,7 +265,186 @@ async function renderMonth(view, month) {
     el('thead', {}, el('tr', {}, el('th', { text: 'Project' }), el('th', { text: 'Hours' }))),
     el('tbody', {}, rows),
     el('tfoot', {}, el('tr', {}, el('td', { text: 'Total' }),
-      el('td', { class: 'copy-cell' }, total, copyButton('Copy total hours', total))))))));
+      el('td', { class: 'copy-cell' }, total, copyButton('Copy total hours', total))))))),
+    dailyChart(data, title, slots));
+}
+
+// ---------- daily chart ----------
+
+// seriesSlots maps month rows (in table order) to color classes. Past eight
+// projects, the eighth slot and beyond fold into a neutral "Other" so the
+// palette never cycles or invents hues.
+function seriesSlots(n) {
+  return Array.from({ length: n }, (_, i) => (n <= 8 || i < 7 ? `s${i + 1}` : 's-other'));
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v);
+  }
+  node.append(...children);
+  return node;
+}
+
+// niceStep picks a y-axis gridline step giving at most five intervals.
+function niceStep(max) {
+  for (const step of [0.5, 1, 2, 4, 6, 8, 12, 24]) {
+    if (max / step <= 5) return step;
+  }
+  return Math.ceil(max / 5);
+}
+
+// barTop draws a bar segment with 4px rounded top corners, square at the bottom.
+function barTop(x, y, w, h) {
+  const r = Math.min(4, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+
+// dailyChart is a stacked column per day of the month, one segment per
+// project (bottom-up in table order). The table above is its legend; the
+// tooltip (hover, tap, or arrow keys) gives exact numbers.
+function dailyChart(data, title, slots) {
+  const n = data.days.length;
+  // Stacks per day: [{ name, slot, h }] with h in hundredths; "Other" merged.
+  const stacks = data.days.map((_, d) => {
+    const segs = [];
+    data.rows.forEach((row, i) => {
+      const h = toHundredths(row.daily[d]);
+      if (h === 0) return;
+      const last = segs[segs.length - 1];
+      if (slots[i] === 's-other' && last && last.slot === 's-other') last.h += h;
+      else segs.push({ slot: slots[i], h });
+    });
+    return segs;
+  });
+  const dayTotals = stacks.map((segs) => segs.reduce((a, s) => a + s.h, 0));
+  const step = niceStep(Math.max(100, ...dayTotals) / 100);
+  const yMax = Math.ceil(Math.max(100, ...dayTotals) / 100 / step) * step;
+  const today = todayLocal();
+
+  const plot = el('div', {
+    class: 'chart-plot', tabindex: '0', role: 'img',
+    'aria-label': `Daily hours stacked by project for ${title}. Use the left and right arrow keys to read each day.`,
+  });
+  const tip = el('div', { class: 'chart-tip', 'aria-live': 'polite', hidden: true });
+  let geom = null, active = -1;
+
+  function draw() {
+    const W = plot.clientWidth;
+    if (!W) return;
+    const H = 240, L = 36, R = 4, T = 10, B = 24;
+    const band = (W - L - R) / n;
+    const barW = Math.max(2, Math.min(24, band * 0.7));
+    const yOf = (hrs) => T + (H - T - B) * (1 - hrs / yMax);
+    geom = { L, band, T, B, H };
+
+    const grid = [];
+    for (let v = 0; v <= yMax + 1e-9; v += step) {
+      const y = Math.round(yOf(v)) + 0.5;
+      grid.push(svgEl('line', { class: v === 0 ? 'chart-base' : 'chart-grid', x1: L, x2: W - R, y1: y, y2: y }));
+      grid.push(svgEl('text', { class: 'chart-tick', x: L - 6, y: y + 4, 'text-anchor': 'end' }, fmtMin(Math.round(v * 100))));
+    }
+    const labelEvery = band >= 22 ? 1 : 0;
+    const xLabels = data.days.map((day, d) => {
+      const num = d + 1;
+      if (!labelEvery && num !== 1 && num % 5 !== 0) return null;
+      return svgEl('text', {
+        class: 'chart-tick' + (day === today ? ' today' : ''),
+        x: L + band * (d + 0.5), y: H - 6, 'text-anchor': 'middle',
+      }, String(num));
+    }).filter(Boolean);
+
+    const bars = stacks.map((segs, d) => {
+      const x = L + band * (d + 0.5) - barW / 2;
+      let cum = 0;
+      return segs.map((seg, k) => {
+        const yBottom = yOf(cum / 100);
+        cum += seg.h;
+        const yTop = yOf(cum / 100);
+        const isTop = k === segs.length - 1;
+        // A 2px surface gap separates stacked segments.
+        const top = isTop ? yTop : Math.min(yTop + 2, yBottom - 1);
+        const h = yBottom - top;
+        return isTop
+          ? svgEl('path', { class: `chart-seg ${seg.slot}`, d: barTop(x, top, barW, h) })
+          : svgEl('rect', { class: `chart-seg ${seg.slot}`, x, y: top, width: barW, height: h });
+      });
+    });
+
+    const hover = svgEl('rect', { class: 'chart-hover', y: T, width: band, height: H - T - B, visibility: 'hidden' });
+    const svg = svgEl('svg', { width: W, height: H, 'aria-hidden': 'true' }, hover, ...grid, ...xLabels, ...bars.flat());
+    plot.replaceChildren(svg, tip);
+    if (active >= 0) show(active);
+  }
+
+  function show(d) {
+    active = d;
+    const hover = plot.querySelector('.chart-hover');
+    hover.setAttribute('x', geom.L + geom.band * d);
+    hover.setAttribute('visibility', 'visible');
+
+    const date = parseYmd(data.days[d]).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const lines = data.rows.map((row, i) => [row, slots[i], toHundredths(row.daily[d])]).filter(([, , h]) => h > 0);
+    tip.replaceChildren(
+      el('div', { class: 'chart-tip-date', text: date }),
+      lines.length === 0
+        ? el('div', { class: 'muted', text: 'No hours' })
+        : el('table', {},
+          el('tbody', {}, lines.map(([row, slot, h]) => el('tr', {},
+            el('td', {}, el('span', { class: `swatch ${slot}`, 'aria-hidden': 'true' }), row.name),
+            el('td', { text: fmtMin(h) })))),
+          lines.length > 1 && el('tfoot', {}, el('tr', {}, el('td', { text: 'Total' }), el('td', { text: fmtMin(dayTotals[d]) })))));
+    tip.hidden = false;
+
+    // Beside the column, flipping left when it would overflow the right edge.
+    const center = geom.L + geom.band * (d + 0.5);
+    const w = tip.offsetWidth;
+    let left = center + geom.band / 2 + 8;
+    if (left + w > plot.clientWidth) left = Math.max(0, center - geom.band / 2 - 8 - w);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${geom.T}px`;
+  }
+
+  function hide() {
+    active = -1;
+    tip.hidden = true;
+    plot.querySelector('.chart-hover')?.setAttribute('visibility', 'hidden');
+  }
+
+  function dayAt(e) {
+    if (!geom) return -1;
+    const x = e.clientX - plot.getBoundingClientRect().left;
+    const d = Math.floor((x - geom.L) / geom.band);
+    return d >= 0 && d < n ? d : -1;
+  }
+
+  plot.addEventListener('pointermove', (e) => {
+    if (e.target.closest('.chart-tip')) return;
+    const d = dayAt(e);
+    if (d < 0) hide(); else if (d !== active) show(d);
+  });
+  plot.addEventListener('pointerdown', (e) => { const d = dayAt(e); if (d >= 0) show(d); });
+  plot.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hide(); });
+  plot.addEventListener('blur', hide);
+  plot.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const delta = e.key === 'ArrowRight' ? 1 : -1;
+      show(active < 0 ? (delta > 0 ? 0 : n - 1) : Math.min(n - 1, Math.max(0, active + delta)));
+    } else if (e.key === 'Escape') hide();
+  });
+
+  // Redraw at the real pixel width (SVG scaling would stretch the text).
+  let lastW = 0;
+  const ro = new ResizeObserver(() => {
+    if (!plot.isConnected) { ro.disconnect(); return; }
+    if (plot.clientWidth !== lastW) { lastW = plot.clientWidth; draw(); }
+  });
+  ro.observe(plot);
+
+  return el('section', { class: 'chart' }, el('h2', { text: 'Daily hours' }), plot);
 }
 
 async function renderProjects(view) {

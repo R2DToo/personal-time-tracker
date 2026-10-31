@@ -109,6 +109,15 @@ func TestAPIEntriesWeekMonth(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"total":1.5`) {
 		t.Errorf("month = %s", rec.Body)
 	}
+	if !strings.Contains(rec.Body.String(), `"daily":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1.5,0,0,0,0,0]`) ||
+		!strings.Contains(rec.Body.String(), `"days":["2026-10-01",`) {
+		t.Errorf("month daily = %s", rec.Body)
+	}
+	// An empty month still lists its days, and rows encode as [] not null.
+	rec = c.call("GET", "/api/month?month=2026-11", "")
+	if !strings.Contains(rec.Body.String(), `"rows":[]`) || !strings.Contains(rec.Body.String(), `"2026-11-30"]`) {
+		t.Errorf("empty month = %s", rec.Body)
+	}
 	for _, bad := range []string{`1.234`, `"1"`, `25`, `-1`} {
 		if rec := c.call("PUT", "/api/entries", `{"projectId":"`+p.ID+`","date":"2026-10-26","hours":`+bad+`}`); rec.Code != 400 {
 			t.Errorf("hours %s: %d", bad, rec.Code)
