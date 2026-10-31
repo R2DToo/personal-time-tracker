@@ -1,0 +1,22 @@
+# Fixed project name so the data volume is always personal-time-tracker_data,
+# whatever folder the repo was cloned into.
+name: personal-time-tracker
+
+services:
+  app:
+    build: .
+    image: personal-time-tracker:local
+    ports:
+      # Bound to 127.0.0.1: only this computer can reach the app.
+      - "127.0.0.1:${PORT:-24871}:${PORT:-24871}"
+    environment:
+      PORT: ${PORT:-24871}
+    volumes:
+      - data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+volumes:
+  data:
